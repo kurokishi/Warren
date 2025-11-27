@@ -12,12 +12,17 @@ def screener_panel():
     use_parallel = st.checkbox("Use Parallel Mode")
     run = st.button("Run Screener")
 
-    if run:
-        with st.spinner("Processing..."):
-            if use_parallel:
-                df = ParallelScreener().run(tickers)
-            else:
-                df = ScreenerEngine().analyze_batch(tickers)
+for _, row in df.iterrows():
+    with st.expander(f"{row['Ticker']} — {row['Label']}"):
+        st.markdown("### 🔍 AI Final Explanation")
+        st.markdown(row["AI_Final"])
+
+        with st.expander("⚙ Rule-based details"):
+            st.markdown(row["AI_Rule"])
+
+        if row["AI_LLM"]:
+            with st.expander("🧠 LLM narrative"):
+                st.markdown(row["AI_LLM"])
 
         st.dataframe(df.sort_values("FinalScore", ascending=False))
         st.bar_chart(df.set_index("Ticker")["FinalScore"])
