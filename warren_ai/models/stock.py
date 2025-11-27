@@ -5,6 +5,8 @@ from warren_ai.core.dividend import DividendEngine
 from warren_ai.core.scoring import ScoringEngine
 
 from warren_ai.ai.hybrid_explainer import HybridAIExplainer
+from warren_ai.ai.confidence import ConfidenceEngine
+from warren_ai.ai.risk import RiskDisclosureEngine
 
 
 class StockAnalyzer:
@@ -52,6 +54,7 @@ class StockAnalyzer:
         result["AI_Rule"] = ai_explanation["rule_based"]
         result["AI_LLM"] = ai_explanation["llm_explanation"]
         result["AI_Final"] = ai_explanation["hybrid"]
-
+        result["Confidence"] = self.confidence.calculate(result)
+        result["Risks"] = self.risk_engine.generate(result)
         return result
 
