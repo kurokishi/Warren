@@ -4,6 +4,7 @@ from warren_ai.core.technical import TechnicalEngine
 from warren_ai.core.dividend import DividendEngine
 from warren_ai.core.scoring import ScoringEngine
 from warren_ai.ai.explanation import AIExplanationEngine
+from warren_ai.ai.hybrid_explainer import HybridAIExplainer
 
 class StockAnalyzer:
     def __init__(self, ticker: str, period="2y"):
