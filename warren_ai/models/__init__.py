@@ -10,5 +10,6 @@ self.confidence = ConfidenceEngine()
 self.risk_engine = RiskDisclosureEngine()
 self.scenario = ScenarioEngine()
 self.stress = StressTestEngine()
+self.compliance = ComplianceEngine()
 
 __all__ = ["StockAnalyzer"]
