@@ -70,3 +70,6 @@ def screener_panel():
             if row.get("AI_LLM"):
                 with st.expander("🧠 LLM Narrative"):
                     st.markdown(row["AI_LLM"])
+    st.divider()
+    st.caption("📜 Regulatory Disclaimer")
+    st.write(df.iloc[0]["Disclaimer"])
