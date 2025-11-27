@@ -36,14 +36,8 @@ class StockAnalyzer:
             "FinalScore": final_score,
             "Label": self.score_engine.label(final_score),
         }
-result = {
-    "Ticker": self.ticker,
-    **fund,
-    **tech,
-    "DividendYield": div["Yield"],
-    "FinalScore": final_score,
-    "Label": self.score_engine.label(final_score),
-}
+ai = self.ai.explain(result)
 
-result["AI_Explanation"] = self.ai.explain(result)
-return result
+result["AI_Rule"] = ai["rule_based"]
+result["AI_LLM"] = ai["llm_explanation"]
+result["AI_Final"] = ai["hybrid"]
