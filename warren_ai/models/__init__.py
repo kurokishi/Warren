@@ -8,5 +8,7 @@ self.ai = AIExplanationEngine()
 self.ai = HybridAIExplainer()
 self.confidence = ConfidenceEngine()
 self.risk_engine = RiskDisclosureEngine()
+self.scenario = ScenarioEngine()
+self.stress = StressTestEngine()
 
 __all__ = ["StockAnalyzer"]
