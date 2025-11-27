@@ -11,6 +11,8 @@ from warren_ai.ai.risk import RiskDisclosureEngine
 from warren_ai.ai.scenario import ScenarioEngine
 from warren_ai.ai.stress import StressTestEngine
 
+from warren_ai.ai.compliance import ComplianceEngine
+
 
 class StockAnalyzer:
     def __init__(self, ticker: str, period="2y"):
