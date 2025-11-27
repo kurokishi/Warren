@@ -35,3 +35,14 @@ class StockAnalyzer:
             "FinalScore": final_score,
             "Label": self.score_engine.label(final_score),
         }
+result = {
+    "Ticker": self.ticker,
+    **fund,
+    **tech,
+    "DividendYield": div["Yield"],
+    "FinalScore": final_score,
+    "Label": self.score_engine.label(final_score),
+}
+
+result["AI_Explanation"] = self.ai.explain(result)
+return result
