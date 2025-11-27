@@ -19,6 +19,15 @@ for _, row in df.iterrows():
 
         with st.expander("⚙ Rule-based details"):
             st.markdown(row["AI_Rule"])
+st.markdown("### 🧪 Scenario & Stress Analysis")
+
+for name, sc in row["Scenarios"].items():
+    st.write(f"**{name}**")
+    st.write(f"Impact Score : {sc['impact']}")
+    st.caption(sc["comment"])
+
+st.progress(int(row["ResilienceScore"]))
+st.caption(f"Resilience Score: {row['ResilienceScore']}/100")
 
         if row["AI_LLM"]:
             with st.expander("🧠 LLM narrative"):
