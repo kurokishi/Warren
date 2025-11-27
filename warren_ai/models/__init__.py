@@ -1,15 +1,8 @@
 """
-Domain models for WarrenAI.
+Domain models for WarrenAI package.
+This __init__ should only export symbols and NOT execute runtime code.
 """
 
 from .stock import StockAnalyzer
-
-self.ai = AIExplanationEngine()
-self.ai = HybridAIExplainer()
-self.confidence = ConfidenceEngine()
-self.risk_engine = RiskDisclosureEngine()
-self.scenario = ScenarioEngine()
-self.stress = StressTestEngine()
-self.compliance = ComplianceEngine()
 
 __all__ = ["StockAnalyzer"]
