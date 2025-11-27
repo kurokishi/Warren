@@ -8,6 +8,9 @@ from warren_ai.ai.hybrid_explainer import HybridAIExplainer
 from warren_ai.ai.confidence import ConfidenceEngine
 from warren_ai.ai.risk import RiskDisclosureEngine
 
+from warren_ai.ai.scenario import ScenarioEngine
+from warren_ai.ai.stress import StressTestEngine
+
 
 class StockAnalyzer:
     def __init__(self, ticker: str, period="2y"):
@@ -56,5 +59,8 @@ class StockAnalyzer:
         result["AI_Final"] = ai_explanation["hybrid"]
         result["Confidence"] = self.confidence.calculate(result)
         result["Risks"] = self.risk_engine.generate(result)
+        scenarios = self.scenario.run(result)
+        result["Scenarios"] = scenarios
+        result["ResilienceScore"] = self.stress.score(scenarios)
         return result
 
