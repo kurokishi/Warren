@@ -62,5 +62,13 @@ class StockAnalyzer:
         scenarios = self.scenario.run(result)
         result["Scenarios"] = scenarios
         result["ResilienceScore"] = self.stress.score(scenarios)
+        # === COMPLIANCE DISCLAIMER ===
+        result["Disclaimer"] = self.compliance.generate(
+            context={
+                "user_type": "retail",
+                "horizon": self.horizon if hasattr(self, "horizon") else "medium",
+            }
+        )
+
         return result
 
