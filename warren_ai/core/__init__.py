@@ -1,10 +1,5 @@
 """
-Core calculation engines:
-- Data loading
-- Fundamental analysis
-- Technical analysis
-- Dividend
-- Scoring
+Core analysis engines for fundamental, technical, and scoring calculations.
 """
 
 from .data_loader import DataLoader
@@ -15,7 +10,7 @@ from .scoring import ScoringEngine
 
 __all__ = [
     "DataLoader",
-    "FundamentalEngine",
+    "FundamentalEngine", 
     "TechnicalEngine",
     "DividendEngine",
     "ScoringEngine",
