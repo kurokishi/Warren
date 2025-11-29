@@ -1,13 +1,16 @@
 import pandas as pd
-from warren_ai.models.stock import StockAnalyzer
-
+from warren_ai.core.stock import StockAnalyzer
 
 class ScreenerEngine:
-    def analyze_batch(self, tickers: list[str]) -> pd.DataFrame:
-        rows = []
-        for t in tickers:
+    def analyze_batch(self, tickers: list) -> pd.DataFrame:
+        results = []
+        for ticker in tickers:
             try:
-                rows.append(StockAnalyzer(t).analyze())
-            except Exception:
+                analyzer = StockAnalyzer(ticker)
+                result = analyzer.analyze()
+                results.append(result)
+            except Exception as e:
+                print(f"Error analyzing {ticker}: {e}")
                 continue
-        return pd.DataFrame(rows)
+        
+        return pd.DataFrame(results)
