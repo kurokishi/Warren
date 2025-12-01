@@ -1,75 +1,89 @@
 import streamlit as st
-from warren_ai.screener.engine import ScreenerEngine
-from warren_ai.screener.parallel_engine import ParallelScreener
+import pandas as pd
 
+try:
+    from warren_ai.screener.engine import ScreenerEngine
+    from warren_ai.screener.parallel_engine import ParallelScreener
+except ImportError as e:
+    st.error(f"Error importing screener modules: {e}")
 
 def screener_panel():
     st.header("AI Stock Screener")
 
-    tickers = st.text_area("Tickers (comma)", "BBCA,TLKM,ASII")
+    tickers = st.text_area("Tickers (comma separated)", "BBCA.JK, TLKM.JK, ASII.JK")
     tickers = [t.strip().upper() for t in tickers.split(",") if t.strip()]
-
-    use_parallel = st.checkbox("Use Parallel Mode")
+    
+    use_parallel = st.checkbox("Use Parallel Mode", value=False)
     run = st.button("Run Screener")
 
     if not run:
+        st.info("Enter tickers and click 'Run Screener' to start analysis")
         return
 
-    with st.spinner("Processing..."):
-        if use_parallel:
-            df = ParallelScreener().run(tickers)
-        else:
-            df = ScreenerEngine().analyze_batch(tickers)
+    if not tickers:
+        st.warning("Please enter at least one ticker")
+        return
+
+    with st.spinner("Analyzing stocks..."):
+        try:
+            if use_parallel:
+                df = ParallelScreener().run(tickers)
+            else:
+                df = ScreenerEngine().analyze_batch(tickers)
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
+            return
 
     if df.empty:
-        st.warning("No data returned.")
+        st.warning("No data returned from analysis.")
         return
 
-    # === MAIN TABLE ===
-    st.subheader("Screener Results")
+    # Display results
+    st.subheader("📊 Screening Results")
     st.dataframe(df.sort_values("FinalScore", ascending=False))
 
+    # Score chart
     st.bar_chart(df.set_index("Ticker")["FinalScore"])
 
-    # === DETAIL PER STOCK ===
-    st.subheader("AI Analysis Detail")
-
+    # Detailed analysis
+    st.subheader("🔍 Detailed Analysis")
     for _, row in df.iterrows():
-        with st.expander(f"{row['Ticker']} — {row['Label']}"):
-
-            # --- AI Explanation ---
-            st.markdown("### 🔍 AI Final Explanation")
-            st.markdown(row.get("AI_Final", "No explanation"))
-
-            # --- Confidence ---
+        with st.expander(f"{row['Ticker']} — {row.get('Label', 'N/A')}"):
+            
+            # AI Explanation
+            if "AI_Final" in row:
+                st.markdown("#### AI Analysis")
+                st.write(row["AI_Final"])
+            
+            # Confidence
             if "Confidence" in row:
-                st.progress(int(row["Confidence"]))
-                st.caption(f"Confidence: {row['Confidence']}%")
-
-            # --- Risk ---
-            if "Risks" in row:
-                st.markdown("### ⚠️ Risk Disclosure")
-                for r in row["Risks"]:
-                    st.markdown(f"- {r}")
-
-            # --- Scenario & Stress ---
-            if "Scenarios" in row:
-                st.markdown("### 🧪 Scenario & Stress Analysis")
-                for name, sc in row["Scenarios"].items():
-                    st.markdown(f"**{name}**")
-                    st.write(f"Impact Score: {sc['impact']}")
-                    st.caption(sc['comment'])
-
-                st.progress(int(row["ResilienceScore"]))
+                st.progress(int(row["Confidence"]) / 100)
+                st.caption(f"Confidence Level: {row['Confidence']}%")
+            
+            # Risks
+            if "Risks" in row and isinstance(row["Risks"], list):
+                st.markdown("#### ⚠️ Risk Factors")
+                for risk in row["Risks"]:
+                    st.write(f"- {risk}")
+            
+            # Scenarios
+            if "Scenarios" in row and isinstance(row["Scenarios"], dict):
+                st.markdown("#### 🧪 Scenario Analysis")
+                for scenario_name, scenario_data in row["Scenarios"].items():
+                    with st.container():
+                        st.write(f"**{scenario_name}**")
+                        st.write(f"Impact: {scenario_data.get('impact', 'N/A')}")
+                        st.caption(scenario_data.get('comment', ''))
+            
+            # Resilience Score
+            if "ResilienceScore" in row:
+                st.progress(int(row["ResilienceScore"]) / 100)
                 st.caption(f"Resilience Score: {row['ResilienceScore']}/100")
 
-            # --- Debug / Transparency ---
-            with st.expander("⚙ Rule-Based Explanation"):
-                st.markdown(row.get("AI_Rule", "-"))
-
-            if row.get("AI_LLM"):
-                with st.expander("🧠 LLM Narrative"):
-                    st.markdown(row["AI_LLM"])
+    # Disclaimer
     st.divider()
     st.caption("📜 Regulatory Disclaimer")
-    st.write(df.iloc[0]["Disclaimer"])
+    if not df.empty and "Disclaimer" in df.columns:
+        st.write(df.iloc[0]["Disclaimer"])
+    else:
+        st.write("Analysis provided for educational purposes only. Invest at your own risk.")
