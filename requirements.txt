@@ -2,5 +2,6 @@ streamlit
 yfinance
 pandas
 numpy
-ta
+ta-lib
+openai
 altair
