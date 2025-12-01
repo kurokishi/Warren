@@ -10,13 +10,13 @@ except ImportError as e:
 def screener_panel():
     st.header("🔍 AI Stock Screener")
     
-    # Input
+    # Input section
     col1, col2 = st.columns([2, 1])
     with col1:
         tickers_input = st.text_area(
             "**Enter Stock Tickers**", 
             "BBCA.JK, TLKM.JK, ASII.JK, BBRI.JK",
-            help="Enter comma-separated ticker symbols"
+            help="Enter comma-separated ticker symbols. For Indonesian stocks, use .JK suffix"
         )
     with col2:
         use_parallel = st.checkbox("Use Parallel Processing", value=False)
@@ -52,16 +52,22 @@ def screener_panel():
     
     # Summary table
     st.subheader("📊 Results Summary")
-    display_df = df[['Ticker', 'FinalScore', 'Label', 'Confidence']].copy()
+    
+    # Create display dataframe with essential columns
+    display_cols = ['Ticker', 'FinalScore', 'Label', 'Confidence']
+    available_cols = [col for col in display_cols if col in df.columns]
+    
+    display_df = df[available_cols].copy()
     st.dataframe(
         display_df.sort_values("FinalScore", ascending=False),
         use_container_width=True
     )
 
     # Score chart
-    st.subheader("📈 Score Comparison")
-    chart_data = df[['Ticker', 'FinalScore']].set_index('Ticker')
-    st.bar_chart(chart_data)
+    if 'FinalScore' in df.columns:
+        st.subheader("📈 Score Comparison")
+        chart_data = df[['Ticker', 'FinalScore']].set_index('Ticker')
+        st.bar_chart(chart_data)
 
     # Detailed analysis
     st.subheader("🔍 Detailed Analysis")
@@ -80,13 +86,13 @@ def screener_panel():
                 st.write(f"**Confidence Level:** {confidence}%")
             
             # Risks
-            if row.get('Risks'):
+            if row.get('Risks') and isinstance(row['Risks'], list):
                 st.markdown("#### ⚠️ Risk Factors")
                 for risk in row['Risks']:
                     st.write(f"• {risk}")
             
             # Scenarios
-            if row.get('Scenarios'):
+            if row.get('Scenarios') and isinstance(row['Scenarios'], dict):
                 st.markdown("#### 🌪️ Scenario Analysis")
                 for scenario, data in row['Scenarios'].items():
                     impact = data.get('impact', 0)
