@@ -1,16 +1,25 @@
 import pandas as pd
-from warren_ai.core.stock import StockAnalyzer
+import streamlit as st
 
 class ScreenerEngine:
     def analyze_batch(self, tickers: list) -> pd.DataFrame:
         results = []
         for ticker in tickers:
             try:
+                # Import here to avoid circular imports
+                from warren_ai.core.stock import StockAnalyzer
+                
                 analyzer = StockAnalyzer(ticker)
                 result = analyzer.analyze()
                 results.append(result)
             except Exception as e:
-                print(f"Error analyzing {ticker}: {e}")
-                continue
+                st.error(f"Error analyzing {ticker}: {str(e)}")
+                # Add placeholder for failed analysis
+                results.append({
+                    "Ticker": ticker,
+                    "Error": str(e),
+                    "FinalScore": 0,
+                    "Label": "ERROR"
+                })
         
         return pd.DataFrame(results)
