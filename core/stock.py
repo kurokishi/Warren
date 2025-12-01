@@ -84,7 +84,6 @@ class StockAnalyzer:
             return result
 
         except Exception as e:
-            st.error(f"Error analyzing {self.ticker}: {str(e)}")
             return {
                 "Ticker": self.ticker,
                 "Error": str(e),
