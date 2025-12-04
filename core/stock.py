@@ -12,9 +12,10 @@ from ai.scenario import ScenarioEngine
 from ai.stress import StressTestEngine
 from ai.compliance import ComplianceEngine
 
+import time
 
 class StockAnalyzer:
-    def __init__(self, ticker: str, period="1y"):
+    def __init__(self, ticker: str, period="3mo"):  # Gunakan 3 bulan saja
         self.ticker = ticker
         self.loader = DataLoader(period)
 
@@ -33,8 +34,10 @@ class StockAnalyzer:
         self.compliance = ComplianceEngine()
 
     def analyze(self):
+        start_time = time.time()
+        
         try:
-            # Load data
+            # Load data dengan progress
             df, stock = self.loader.load(self.ticker)
             info = stock.info
 
@@ -78,12 +81,14 @@ class StockAnalyzer:
                 "Disclaimer": self.compliance.generate({
                     "user_type": "retail",
                     "horizon": "medium"
-                })
+                }),
+                "AnalysisTime": round(time.time() - start_time, 2)
             })
 
             return result
 
         except Exception as e:
+            st.error(f"Error analyzing {self.ticker}: {str(e)}")
             return {
                 "Ticker": self.ticker,
                 "Error": str(e),
@@ -94,5 +99,6 @@ class StockAnalyzer:
                 "Risks": [f"Analysis error: {str(e)}"],
                 "Scenarios": {},
                 "ResilienceScore": 0,
-                "Disclaimer": "Analysis unavailable due to error."
+                "Disclaimer": "Analysis unavailable due to error.",
+                "AnalysisTime": round(time.time() - start_time, 2)
             }
