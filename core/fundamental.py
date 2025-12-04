@@ -5,13 +5,15 @@ class FundamentalEngine:
             pbv = info.get("priceToBook")
             roe = info.get("returnOnEquity")
             
-            # Handle missing/None values
-            if pe is None or not isinstance(pe, (int, float)):
-                pe = 20.0  # Default value
-            if pbv is None or not isinstance(pbv, (int, float)):
-                pbv = 2.5  # Default value
-            if roe is None or not isinstance(roe, (int, float)):
-                roe = 0.1  # Default value
+            # Ensure numeric values
+            pe = float(pe) if pe is not None and pd.notna(pe) else 20.0
+            pbv = float(pbv) if pbv is not None and pd.notna(pbv) else 2.5
+            roe = float(roe) if roe is not None and pd.notna(roe) else 0.12
+            
+            # Clamp values to reasonable ranges
+            pe = max(0.1, min(pe, 100))
+            pbv = max(0.1, min(pbv, 10))
+            roe = max(-1.0, min(roe, 1.0))
             
             score = 0
             if pe < 15: score += 2
@@ -24,15 +26,16 @@ class FundamentalEngine:
             elif roe > 0.08: score += 1
 
             return {
-                "PER": round(float(pe), 2),
-                "PBV": round(float(pbv), 2),
-                "ROE": round(float(roe), 4),
+                "PER": round(pe, 2),
+                "PBV": round(pbv, 2),
+                "ROE": round(roe, 4),
                 "FundamentalScore": score
             }
         except Exception as e:
+            # Return safe default values
             return {
                 "PER": 20.0,
                 "PBV": 2.5,
-                "ROE": 0.1,
+                "ROE": 0.12,
                 "FundamentalScore": 3
             }
