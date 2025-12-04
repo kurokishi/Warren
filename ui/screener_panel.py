@@ -50,7 +50,7 @@ def screener_panel():
     # Display results
     st.success(f"✅ Analysis complete! Processed {len(df)} stocks")
     
-    # Summary table
+    # Summary table - FIX Streamlit warning
     st.subheader("📊 Results Summary")
     
     # Create display dataframe with essential columns
@@ -58,9 +58,11 @@ def screener_panel():
     available_cols = [col for col in display_cols if col in df.columns]
     
     display_df = df[available_cols].copy()
+    
+    # FIX: Replace use_container_width with width parameter
     st.dataframe(
         display_df.sort_values("FinalScore", ascending=False),
-        use_container_width=True
+        width=None  # Streamlit akan menyesuaikan secara otomatis
     )
 
     # Score chart
@@ -71,8 +73,17 @@ def screener_panel():
 
     # Detailed analysis
     st.subheader("🔍 Detailed Analysis")
+    
     for _, row in df.iterrows():
-        with st.expander(f"{row['Ticker']} - {row.get('Label', 'N/A')} (Score: {row.get('FinalScore', 0)})"):
+        ticker = row['Ticker']
+        label = row.get('Label', 'N/A')
+        score = row.get('FinalScore', 0)
+        
+        with st.expander(f"{ticker} - {label} (Score: {score})"):
+            
+            # Tampilkan error jika ada
+            if 'Error' in row and row['Error']:
+                st.error(f"**Error:** {row['Error']}")
             
             # AI Analysis
             if row.get('AI_Final'):
@@ -104,6 +115,10 @@ def screener_panel():
                 resilience = int(row['ResilienceScore'])
                 st.progress(resilience / 100)
                 st.write(f"**Resilience Score:** {resilience}/100")
+            
+            # Data debugging
+            with st.expander("📊 Raw Data"):
+                st.json({k: v for k, v in row.items() if k not in ['Scenarios', 'Risks']})
 
     # Disclaimer
     st.divider()
