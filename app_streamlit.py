@@ -1,22 +1,24 @@
-import os
-import sys
 import streamlit as st
+import yfinance as yf
+import pandas as pd
 
-# Setup path
-ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, ROOT)
+st.title("Test Yahoo Finance")
 
-try:
-    from ui.screener_panel import screener_panel
-except ImportError as e:
-    st.error(f"Import Error: {e}")
-    st.stop()
+ticker = st.text_input("Ticker", "BBCA.JK")
 
-st.set_page_config(
-    page_title="WarrenAI Stock Analysis",
-    page_icon="📈",
-    layout="wide"
-)
-
-st.title("📈 WarrenAI – Stock Analysis Dashboard")
-screener_panel()
+if st.button("Test"):
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1mo")
+        
+        if df.empty:
+            st.error("Data kosong!")
+        else:
+            st.success(f"Success! Data shape: {df.shape}")
+            st.dataframe(df.head())
+            
+            info = stock.info
+            st.json({k: info[k] for k in ['symbol', 'shortName', 'trailingPE'] if k in info})
+            
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
