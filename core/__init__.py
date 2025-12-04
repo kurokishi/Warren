@@ -1,3 +1,4 @@
+# core/__init__.py
 from .data_loader import DataLoader
 from .fundamental import FundamentalEngine
 from .technical import TechnicalEngine
