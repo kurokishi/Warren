@@ -1,3 +1,5 @@
+import pandas as pd  # ✅ TAMBAHKAN INI
+
 class FundamentalEngine:
     def analyze(self, info: dict) -> dict:
         try:
