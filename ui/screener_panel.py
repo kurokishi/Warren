@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import time  # ✅ TAMBAHKAN INI
 
 try:
     from screener.engine import ScreenerEngine
@@ -78,29 +79,44 @@ def screener_panel():
         st.subheader("📊 Results Summary")
         
         # Filter hanya baris yang berhasil
-        valid_df = df[~df['Label'].isin(['ERROR', 'Failed'])]
+        if 'Label' in df.columns:
+            valid_df = df[~df['Label'].isin(['ERROR', 'Failed'])]
+        else:
+            valid_df = df
         
         if len(valid_df) > 0:
             # Buat summary cards
             cols = st.columns(4)
             
             with cols[0]:
-                avg_score = valid_df['FinalScore'].mean()
-                st.metric("📈 Average Score", f"{avg_score:.1f}")
+                if 'FinalScore' in valid_df.columns:
+                    avg_score = valid_df['FinalScore'].mean()
+                    st.metric("📈 Average Score", f"{avg_score:.1f}")
+                else:
+                    st.metric("📈 Average Score", "N/A")
             
             with cols[1]:
-                buy_count = len(valid_df[valid_df['Label'].str.contains('BUY', case=False)])
-                st.metric("🟢 Buy Signals", buy_count)
+                if 'Label' in valid_df.columns:
+                    buy_count = len(valid_df[valid_df['Label'].str.contains('BUY', case=False)])
+                    st.metric("🟢 Buy Signals", buy_count)
+                else:
+                    st.metric("🟢 Buy Signals", 0)
             
             with cols[2]:
-                hold_count = len(valid_df[valid_df['Label'] == 'HOLD'])
-                st.metric("🟡 HOLD", hold_count)
+                if 'Label' in valid_df.columns:
+                    hold_count = len(valid_df[valid_df['Label'] == 'HOLD'])
+                    st.metric("🟡 HOLD", hold_count)
+                else:
+                    st.metric("🟡 HOLD", 0)
             
             with cols[3]:
-                avoid_count = len(valid_df[valid_df['Label'] == 'AVOID'])
-                st.metric("🔴 AVOID", avoid_count)
+                if 'Label' in valid_df.columns:
+                    avoid_count = len(valid_df[valid_df['Label'] == 'AVOID'])
+                    st.metric("🔴 AVOID", avoid_count)
+                else:
+                    st.metric("🔴 AVOID", 0)
         
-        # Results table - FIXED width parameter
+        # Results table
         st.markdown("#### 📋 Detailed Results")
         
         # Pilih kolom untuk ditampilkan
@@ -121,26 +137,29 @@ def screener_panel():
                 display_df['ResilienceScore'] = display_df['ResilienceScore'].astype(int).astype(str) + '/100'
             
             # Sort by score
-            display_df = display_df.sort_values('FinalScore', ascending=False)
+            if 'FinalScore' in display_df.columns:
+                display_df = display_df.sort_values('FinalScore', ascending=False)
             
-            # Tampilkan table dengan width yang benar
+            # Tampilkan table
             st.dataframe(
                 display_df,
-                use_container_width=True,  # Ini yang harus diperbaiki
+                use_container_width=True,
                 hide_index=True
             )
             
             # Score chart
             if 'FinalScore' in df.columns:
                 st.markdown("#### 📈 Score Comparison")
-                chart_data = df[['Ticker', 'FinalScore']].set_index('Ticker').sort_values('FinalScore', ascending=False)
+                chart_data = df[['Ticker', 'FinalScore']].set_index('Ticker')
+                if 'FinalScore' in df.columns:
+                    chart_data = chart_data.sort_values('FinalScore', ascending=False)
                 st.bar_chart(chart_data)
 
     # Detailed analysis untuk setiap stock
     st.subheader("🔍 Detailed Analysis")
     
     for idx, row in df.iterrows():
-        ticker = row['Ticker']
+        ticker = row['Ticker'] if 'Ticker' in row else f"Stock_{idx}"
         label = row.get('Label', 'N/A')
         score = row.get('FinalScore', 0)
         
@@ -179,14 +198,20 @@ def screener_panel():
             with fund_cols[0]:
                 if row.get('PER'):
                     st.metric("PER", f"{row['PER']:.1f}")
+                else:
+                    st.metric("PER", "N/A")
             
             with fund_cols[1]:
                 if row.get('PBV'):
                     st.metric("PBV", f"{row['PBV']:.2f}")
+                else:
+                    st.metric("PBV", "N/A")
             
             with fund_cols[2]:
                 if row.get('ROE'):
                     st.metric("ROE", f"{row['ROE']:.1%}")
+                else:
+                    st.metric("ROE", "N/A")
             
             # Technical Data
             st.markdown("##### 📈 Technical Data")
@@ -195,10 +220,14 @@ def screener_panel():
             with tech_cols[0]:
                 if row.get('RSI'):
                     st.metric("RSI", f"{row['RSI']:.1f}")
+                else:
+                    st.metric("RSI", "N/A")
             
             with tech_cols[1]:
                 if row.get('MACD'):
                     st.metric("MACD", f"{row['MACD']:.4f}")
+                else:
+                    st.metric("MACD", "N/A")
             
             # Risks
             if row.get('Risks') and isinstance(row['Risks'], list) and len(row['Risks']) > 0:
