@@ -24,3 +24,31 @@ Aplikasi prediksi harga saham berbasis AI untuk pasar Indonesia dengan pendekata
 - Dark/light mode ready
 
 ## 📁 Struktur Project
+warren/
+├── app_streamlit.py
+├── requirements.txt
+├── core/
+│   ├── __init__.py
+│   ├── data_loader.py
+│   ├── fundamental.py
+│   ├── technical.py
+│   ├── dividend.py
+│   ├── scoring.py
+│   └── stock.py
+├── ai/
+│   ├── __init__.py
+│   ├── hybrid_explainer.py
+│   ├── confidence.py
+│   ├── risk.py
+│   ├── scenario.py
+│   ├── stress.py
+│   ├── compliance.py
+│   ├── explanation.py
+│   └── llm_client.py
+├── screener/
+│   ├── __init__.py
+│   ├── engine.py
+│   └── parallel_engine.py
+└── ui/
+    ├── __init__.py
+    └── screener_panel.py
