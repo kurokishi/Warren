@@ -214,60 +214,153 @@ def render_stock_details(row):
     render_existing_analysis(row)
 
 def display_price_prediction(prediction, ticker):
-    """Display price prediction results"""
-    st.markdown(f"#### 🔮 Price Prediction for {ticker}")
+    """Display CONSERVATIVE price prediction with proper warnings"""
     
+    if "error" in prediction:
+        st.warning(f"Prediksi harga untuk {ticker} tidak tersedia")
+        return
+    
+    st.markdown(f"#### 🔮 Analisis Teknis & Prediksi {ticker}")
+    
+    # WARNING BANNER
+    st.warning("""
+    ⚠️ **PERINGATAN PENTING:** 
+    Prediksi harga bersifat probabilistik dan tidak akurat. 
+    **JANGAN** gunakan sebagai satu-satunya dasar keputusan investasi.
+    Selalu lakukan analisis independen dan konsultasi dengan penasihat keuangan.
+    """)
+    
+    # Current price and realistic range
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        current = prediction.get('current_price', 0)
         st.metric(
-            "Current Price", 
-            f"Rp {prediction.get('current_price', 0):,.0f}",
-            delta=f"{prediction.get('potential_change_pct', 0):+.2f}%"
+            "Harga Saat Ini", 
+            f"Rp {current:,.0f}",
+            help="Harga penutupan terakhir"
         )
     
     with col2:
-        trend = prediction.get('trend', 'neutral')
-        trend_icon = "📈" if trend == "bullish" else "📉" if trend == "bearish" else "➖"
+        range_info = prediction.get('realistic_range', {})
+        optimistic = range_info.get('optimistic', current)
         st.metric(
-            "Next Day", 
-            f"Rp {prediction.get('next_day_prediction', 0):,.0f}",
-            delta=trend_icon
+            "Range Optimistis (5 hari)", 
+            f"Rp {optimistic:,.0f}",
+            delta=f"+{(optimistic/current-1)*100:.1f}%",
+            delta_color="off"
         )
     
     with col3:
-        confidence = prediction.get('confidence', 50)
-        st.metric("Confidence", f"{confidence}%")
-    
-    # Prediction chart
-    if 'predictions' in prediction and len(prediction['predictions']) > 0:
-        fig = go.Figure()
-        
-        # Current price
-        fig.add_trace(go.Scatter(
-            x=[0], y=[prediction['current_price']],
-            mode='markers',
-            marker=dict(size=15, color='blue'),
-            name='Current Price'
-        ))
-        
-        # Predictions
-        fig.add_trace(go.Scatter(
-            x=list(range(1, len(prediction['predictions']) + 1)),
-            y=prediction['predictions'],
-            mode='lines+markers',
-            line=dict(color='green' if prediction['trend'] == 'bullish' else 'red'),
-            name='Predictions'
-        ))
-        
-        fig.update_layout(
-            title=f"5-Day Price Prediction ({prediction['trend'].upper()})",
-            xaxis_title="Days Ahead",
-            yaxis_title="Price",
-            height=400
+        pessimistic = range_info.get('pessimistic', current)
+        st.metric(
+            "Range Pesimistis (5 hari)", 
+            f"Rp {pessimistic:,.0f}",
+            delta=f"-{(1-pessimistic/current)*100:.1f}%",
+            delta_color="off"
         )
+    
+    # Volatility and Confidence
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        volatility = prediction.get('volatility_pct', 0)
+        st.metric(
+            "Volatilitas Historis", 
+            f"{volatility:.1f}%",
+            help="Standar deviasi pergerakan harian"
+        )
+    
+    with col2:
+        confidence = prediction.get('confidence', 0)
+        st.metric(
+            "Tingkat Kepercayaan", 
+            f"{confidence:.0f}%",
+            help="Seberapa yakin sistem dengan prediksi ini"
+        )
+    
+    # Trading Scenarios (MORE USEFUL than single prediction)
+    if 'trading_scenarios' in prediction:
+        st.markdown("##### 📊 Skenario Trading yang Mungkin")
         
-        st.plotly_chart(fig, use_container_width=True)
+        scenarios = prediction['trading_scenarios']
+        
+        if 'conservative_advice' in scenarios:
+            # When data is limited
+            advice = scenarios['conservative_advice']
+            st.info(f"**{advice['message']}**")
+            st.write(f"**Rekomendasi:** {advice['recommendation']}")
+            st.write(f"**Tindakan:** {advice['suggested_action']}")
+            st.write(f"**Tingkat Risiko:** {advice['risk_level']}")
+        else:
+            # Display multiple scenarios
+            for scenario_name, scenario_data in scenarios.items():
+                with st.expander(f"📈 {scenario_name.replace('_', ' ').title()} ({scenario_data.get('probability', 'N/A')})"):
+                    st.write(f"**Deskripsi:** {scenario_data.get('description', '')}")
+                    
+                    if 'target' in scenario_data:
+                        st.write(f"**Target Price:** Rp {scenario_data['target']:,.0f}")
+                    
+                    if 'stop_loss' in scenario_data:
+                        st.write(f"**Stop Loss:** Rp {scenario_data['stop_loss']:,.0f}")
+                    
+                    if 'condition' in scenario_data:
+                        st.write(f"**Kondisi Trigger:** {scenario_data['condition']}")
+                    
+                    st.write(f"**Tingkat Risiko:** {scenario_data.get('risk', 'N/A')}")
+    
+    # Support & Resistance Levels
+    if 'support_resistance' in prediction:
+        sr = prediction['support_resistance']
+        st.markdown("##### 📍 Level Support & Resistance")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'recent_high' in sr:
+                st.metric("Resistance (High 20H)", f"Rp {sr['recent_high']:,.0f}")
+        
+        with col2:
+            if 'recent_low' in sr:
+                st.metric("Support (Low 20H)", f"Rp {sr['recent_low']:,.0f}")
+        
+        if 'psychological_levels' in sr and sr['psychological_levels']:
+            st.write("**Level Psikologis Terdekat:**")
+            for level in sr['psychological_levels']:
+                diff_pct = (level - current) / current * 100
+                st.write(f"- Rp {level:,.0f} ({diff_pct:+.1f}%)")
+    
+    # Bollinger Bands
+    if 'bollinger_bands' in prediction and prediction['bollinger_bands']:
+        bb = prediction['bollinger_bands']
+        st.markdown("##### 📊 Bollinger Bands Analysis")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Upper Band", f"Rp {bb.get('upper', 0):,.0f}")
+        
+        with col2:
+            st.metric("Middle (MA 20)", f"Rp {bb.get('middle', 0):,.0f}")
+        
+        with col3:
+            st.metric("Lower Band", f"Rp {bb.get('lower', 0):,.0f}")
+        
+        width = bb.get('width_pct', 0)
+        if width < 10:
+            st.info(f"📉 **Bandwidth {width:.1f}%** - Volatilitas rendah, kemungkinan konsolidasi")
+        elif width > 20:
+            st.warning(f"📈 **Bandwidth {width:.1f}%** - Volatilitas tinggi, kemungkinan breakout")
+    
+    # Disclaimer Section
+    st.markdown("---")
+    st.caption("""
+    **Catatan Penting:** 
+    1. Prediksi berdasarkan data historis dan pola statistik
+    2. Tidak memperhitungkan faktor fundamental mendadak (earnings surprise, news, dll)
+    3. Pasar saham Indonesia memiliki karakteristik unik yang mungkin tidak tercermin dalam model
+    4. Selalu gunakan stop loss dan risk management yang ketat
+    """)
 
 def display_news_sentiment(news_data):
     """Display news sentiment analysis"""
