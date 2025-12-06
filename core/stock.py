@@ -11,10 +11,9 @@ from ai.risk import RiskDisclosureEngine
 from ai.scenario import ScenarioEngine
 from ai.stress import StressTestEngine
 from ai.compliance import ComplianceEngine
-from ai.price_predictor import PricePredictor  # ✅ New
-from ai.news_analyzer import NewsSentimentAnalyzer  # ✅ New
-from ai.peer_comparator import PeerComparator  # ✅ New
-from ai.price_predictor import ConservativePricePredictor  # ✅ New
+from ai.price_predictor import ConservativePricePredictor  # ✅ Fixed import
+from ai.news_analyzer import NewsSentimentAnalyzer
+from ai.peer_comparator import PeerComparator
 
 import time
 
@@ -37,11 +36,10 @@ class StockAnalyzer:
         self.stress = StressTestEngine()
         self.compliance = ComplianceEngine()
         
-        # ✅ New AI Enhancement Engines
-        self.predictor = PricePredictor()
+        # ✅ AI Enhancement Engines
+        self.predictor = ConservativePricePredictor()  # ✅ Use ConservativePricePredictor directly
         self.news_analyzer = NewsSentimentAnalyzer()
         self.peer_comparator = PeerComparator()
-        self.predictor = ConservativePricePredictor()  # ✅ Updated
 
     def analyze(self):
         start_time = time.time()
@@ -63,7 +61,7 @@ class StockAnalyzer:
             )
             label = self.score_engine.label(final_score)
 
-            # Build result
+            # Build initial result
             result = {
                 "Ticker": self.ticker,
                 **fund_result,
@@ -74,21 +72,41 @@ class StockAnalyzer:
                 "CurrentPrice": df['Close'].iloc[-1] if not df.empty else 0
             }
 
-            # ✅ NEW: Price Prediction
+            # ✅ Conservative Price Prediction with Trading Scenarios
             try:
-                price_prediction = self.predictor.predict_next_days(df, days=5)
-                result["PricePrediction"] = price_prediction
+                if not df.empty and len(df) > 10:
+                    # Get conservative prediction using the correct method name
+                    price_prediction = self.predictor.predict_with_volatility_model(df, days=5)
+                    
+                    # Get trading scenarios
+                    trading_scenarios = self.predictor.generate_trading_scenarios(df)
+                    
+                    result["PricePrediction"] = {
+                        **price_prediction,
+                        "trading_scenarios": trading_scenarios,
+                        "warning": "⚠️ PREDIKSI HARGA BUKAN REKOMENDASI TRADING. Gunakan hanya sebagai alat bantu analisis teknis. Performa masa lalu tidak menjamin hasil masa depan."
+                    }
+                else:
+                    result["PricePrediction"] = {
+                        "error": "Data tidak cukup",
+                        "message": "Data historis kurang dari 10 hari untuk prediksi yang akurat.",
+                        "advice": "Kumpulkan lebih banyak data atau gunakan analisis fundamental."
+                    }
             except Exception as pred_error:
-                result["PricePrediction"] = {"error": str(pred_error)[:100]}
+                result["PricePrediction"] = {
+                    "error": "Prediksi tidak tersedia",
+                    "message": f"Error: {str(pred_error)[:100]}",
+                    "advice": "Fokus pada analisis fundamental dan teknikal saat ini."
+                }
 
-            # ✅ NEW: News Sentiment Analysis
+            # ✅ News Sentiment Analysis
             try:
                 news_analysis = self.news_analyzer.get_news_summary(self.ticker)
                 result["NewsSentiment"] = news_analysis
             except Exception as news_error:
                 result["NewsSentiment"] = {"error": str(news_error)[:100]}
 
-            # ✅ NEW: Peer Comparison Data
+            # ✅ Peer Comparison Data
             try:
                 comparison_data = self.peer_comparator.create_comparison_data(
                     self.ticker, result
@@ -153,26 +171,6 @@ class StockAnalyzer:
 
             result["AnalysisTime"] = round(time.time() - start_time, 2)
 
-                # ✅ NEW: Conservative Price Prediction with Scenarios
-            try:
-                # Get conservative prediction
-                price_prediction = self.predictor.predict_with_volatility_model(df, days=5)
-                
-                # Get trading scenarios (more useful than single prediction)
-                trading_scenarios = self.predictor.generate_trading_scenarios(df)
-                
-                result["PricePrediction"] = {
-                    **price_prediction,
-                    "trading_scenarios": trading_scenarios,
-                    "warning": "⚠️ PREDIKSI HARGA BUKAN REKOMENDASI TRADING. Gunakan hanya sebagai alat bantu analisis teknis. Performa masa lalu tidak menjamin hasil masa depan."
-                }
-            except Exception as pred_error:
-                result["PricePrediction"] = {
-                    "error": "Prediksi tidak tersedia",
-                    "message": "Sistem prediksi sementara tidak dapat diakses.",
-                    "advice": "Fokus pada analisis fundamental dan teknikal saat ini."
-                }
-
             return result
 
         except Exception as e:
@@ -187,5 +185,9 @@ class StockAnalyzer:
                 "Scenarios": {},
                 "ResilienceScore": 0,
                 "Disclaimer": "Analysis unavailable due to technical error.",
-                "AnalysisTime": round(time.time() - start_time, 2)
+                "AnalysisTime": round(time.time() - start_time, 2),
+                "PricePrediction": {
+                    "error": "System error",
+                    "message": "Analisis sistem tidak dapat berjalan sepenuhnya"
+                }
             }
