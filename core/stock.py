@@ -11,6 +11,9 @@ from ai.risk import RiskDisclosureEngine
 from ai.scenario import ScenarioEngine
 from ai.stress import StressTestEngine
 from ai.compliance import ComplianceEngine
+from ai.price_predictor import PricePredictor  # ✅ New
+from ai.news_analyzer import NewsSentimentAnalyzer  # ✅ New
+from ai.peer_comparator import PeerComparator  # ✅ New
 
 import time
 
@@ -32,6 +35,11 @@ class StockAnalyzer:
         self.scenario = ScenarioEngine()
         self.stress = StressTestEngine()
         self.compliance = ComplianceEngine()
+        
+        # ✅ New AI Enhancement Engines
+        self.predictor = PricePredictor()
+        self.news_analyzer = NewsSentimentAnalyzer()
+        self.peer_comparator = PeerComparator()
 
     def analyze(self):
         start_time = time.time()
@@ -53,7 +61,7 @@ class StockAnalyzer:
             )
             label = self.score_engine.label(final_score)
 
-            # Build result dengan default values
+            # Build result
             result = {
                 "Ticker": self.ticker,
                 **fund_result,
@@ -61,7 +69,36 @@ class StockAnalyzer:
                 "DividendYield": div_result.get("Yield", 0),
                 "FinalScore": final_score,
                 "Label": label,
+                "CurrentPrice": df['Close'].iloc[-1] if not df.empty else 0
             }
+
+            # ✅ NEW: Price Prediction
+            try:
+                price_prediction = self.predictor.predict_next_days(df, days=5)
+                result["PricePrediction"] = price_prediction
+            except Exception as pred_error:
+                result["PricePrediction"] = {"error": str(pred_error)[:100]}
+
+            # ✅ NEW: News Sentiment Analysis
+            try:
+                news_analysis = self.news_analyzer.get_news_summary(self.ticker)
+                result["NewsSentiment"] = news_analysis
+            except Exception as news_error:
+                result["NewsSentiment"] = {"error": str(news_error)[:100]}
+
+            # ✅ NEW: Peer Comparison Data
+            try:
+                comparison_data = self.peer_comparator.create_comparison_data(
+                    self.ticker, result
+                )
+                result["PeerComparison"] = comparison_data.to_dict('records')
+                
+                # Generate comparison insights
+                insights = self.peer_comparator.get_comparison_insights(comparison_data)
+                result["PeerInsights"] = insights
+            except Exception as comp_error:
+                result["PeerComparison"] = []
+                result["PeerInsights"] = f"Comparison error: {str(comp_error)[:100]}"
 
             # AI Explanation
             try:
@@ -82,7 +119,7 @@ class StockAnalyzer:
             try:
                 result["Confidence"] = self.confidence.calculate(result)
             except:
-                result["Confidence"] = 50  # Default
+                result["Confidence"] = 50
 
             # Risks
             try:
@@ -100,7 +137,7 @@ class StockAnalyzer:
             except:
                 result.update({
                     "Scenarios": {},
-                    "ResilienceScore": 50,  # Default
+                    "ResilienceScore": 50,
                 })
 
             # Compliance
