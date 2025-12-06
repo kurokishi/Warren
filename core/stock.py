@@ -14,6 +14,7 @@ from ai.compliance import ComplianceEngine
 from ai.price_predictor import PricePredictor  # ✅ New
 from ai.news_analyzer import NewsSentimentAnalyzer  # ✅ New
 from ai.peer_comparator import PeerComparator  # ✅ New
+from ai.price_predictor import ConservativePricePredictor  # ✅ New
 
 import time
 
@@ -40,6 +41,7 @@ class StockAnalyzer:
         self.predictor = PricePredictor()
         self.news_analyzer = NewsSentimentAnalyzer()
         self.peer_comparator = PeerComparator()
+        self.predictor = ConservativePricePredictor()  # ✅ Updated
 
     def analyze(self):
         start_time = time.time()
@@ -150,6 +152,26 @@ class StockAnalyzer:
                 result["Disclaimer"] = "Standard disclaimer: For educational purposes only."
 
             result["AnalysisTime"] = round(time.time() - start_time, 2)
+
+                # ✅ NEW: Conservative Price Prediction with Scenarios
+            try:
+                # Get conservative prediction
+                price_prediction = self.predictor.predict_with_volatility_model(df, days=5)
+                
+                # Get trading scenarios (more useful than single prediction)
+                trading_scenarios = self.predictor.generate_trading_scenarios(df)
+                
+                result["PricePrediction"] = {
+                    **price_prediction,
+                    "trading_scenarios": trading_scenarios,
+                    "warning": "⚠️ PREDIKSI HARGA BUKAN REKOMENDASI TRADING. Gunakan hanya sebagai alat bantu analisis teknis. Performa masa lalu tidak menjamin hasil masa depan."
+                }
+            except Exception as pred_error:
+                result["PricePrediction"] = {
+                    "error": "Prediksi tidak tersedia",
+                    "message": "Sistem prediksi sementara tidak dapat diakses.",
+                    "advice": "Fokus pada analisis fundamental dan teknikal saat ini."
+                }
 
             return result
 
