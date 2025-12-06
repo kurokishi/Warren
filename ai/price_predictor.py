@@ -3,15 +3,11 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 import warnings
-warnings.filterwarnings('ignore')
+import yfinance as yf
+from datetime import datetime, timedelta
+import time
 
-# Import yfinance untuk data real-time
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-    print("Warning: yfinance not installed. Install with: pip install yfinance")
+warnings.filterwarnings('ignore')
 
 class ConservativePricePredictor:
     """
@@ -20,6 +16,7 @@ class ConservativePricePredictor:
     - Uses Bollinger Bands for realistic range
     - Emphasizes mean reversion
     - Clear disclaimer about limitations
+    - Real-time data fetching capability
     """
     
     def __init__(self):
@@ -31,120 +28,412 @@ class ConservativePricePredictor:
         self.VOLATILITY_WINDOW = 20   # Lookback for volatility calculation
         self.CONFIDENCE_DECAY = 0.8   # Confidence decays over prediction horizon
         
-        # Cache untuk menyimpan data real-time
+        # Cache untuk data per ticker
+        self.data_cache = {}
         self.price_cache = {}
-        self.cache_timeout = 300  # 5 menit
+        self.cache_timeout = 60  # Cache timeout 60 detik
     
-    def get_realtime_price(self, ticker):
+    # ========== NEW METHODS FOR TICKER-BASED PREDICTION ==========
+    
+    def clear_cache(self, ticker: str = None):
+        """Clear cache untuk ticker tertentu atau semua cache"""
+        if ticker:
+            cache_keys = [k for k in self.data_cache.keys() if k.startswith(ticker)]
+            for key in cache_keys:
+                self.data_cache.pop(key, None)
+                self.price_cache.pop(key, None)
+            print(f"Cache cleared for {ticker}")
+        else:
+            self.data_cache = {}
+            self.price_cache = {}
+            print("All cache cleared")
+    
+    def predict_for_ticker(self, ticker: str, days: int = 5, use_cache: bool = True) -> dict:
         """
-        Get real-time price from Yahoo Finance for Indonesian stocks
-        """
-        if not YFINANCE_AVAILABLE:
-            return None
+        Main method untuk prediksi berdasarkan ticker
+        
+        Args:
+            ticker: Stock ticker (e.g., 'TLKM.JK')
+            days: Number of days to predict
+            use_cache: Whether to use cached data
             
+        Returns:
+            Dictionary dengan hasil prediksi
+        """
+        start_time = time.time()
+        
         try:
-            # Clean ticker symbol
-            ticker_clean = ticker.upper().replace('.JK', '') + '.JK'
+            # Validasi input
+            if not ticker or not isinstance(ticker, str):
+                return self._create_error_response("Ticker tidak valid")
             
-            # Check cache first
-            current_time = pd.Timestamp.now()
-            if ticker_clean in self.price_cache:
-                cached_price, cached_time = self.price_cache[ticker_clean]
-                if (current_time - cached_time).seconds < self.cache_timeout:
+            ticker = ticker.strip().upper()
+            if not ticker:
+                return self._create_error_response("Ticker tidak boleh kosong")
+            
+            print(f"🔍 Predicting for {ticker} for {days} days...")
+            
+            # Format ticker untuk Yahoo Finance
+            ticker_yf = self._format_ticker_for_yahoo(ticker)
+            
+            # Cek cache
+            cache_key = f"{ticker}_{days}"
+            if use_cache and cache_key in self.data_cache:
+                cached_data = self.data_cache[cache_key]
+                cache_age = time.time() - cached_data['timestamp']
+                
+                if cache_age < self.cache_timeout:
+                    print(f"⚡ Using cached prediction (age: {cache_age:.1f}s)")
+                    result = cached_data['result'].copy()
+                    result['cache_used'] = True
+                    result['cache_age_seconds'] = cache_age
+                    return result
+            
+            # Step 1: Dapatkan data historis
+            df = self._get_fresh_historical_data(ticker_yf)
+            
+            if df.empty:
+                return self._create_error_response(
+                    f"Tidak dapat mengambil data untuk {ticker}. "
+                    f"Pastikan ticker benar (contoh: TLKM.JK, BBCA.JK)"
+                )
+            
+            # Step 2: Dapatkan harga saat ini
+            current_price = self._get_current_price(ticker_yf, df)
+            
+            if current_price <= 0:
+                return self._create_error_response(
+                    f"Tidak dapat mendapatkan harga untuk {ticker}. "
+                    f"Mungkin ticker tidak valid atau data tidak tersedia."
+                )
+            
+            # Step 3: Generate prediction dengan harga yang sudah didapat
+            result = self.predict_with_volatility_model_and_price(df, current_price, days)
+            
+            # Step 4: Tambahkan metadata
+            result.update({
+                'ticker': ticker,
+                'data_points': len(df),
+                'latest_data_date': df.index[-1].strftime('%Y-%m-%d') if len(df) > 0 else 'N/A',
+                'price_source': self._get_price_source(ticker_yf, df),
+                'realtime_price_used': self._is_realtime_price_used(ticker_yf, df),
+                'cache_used': False,
+                'processing_time': round(time.time() - start_time, 2),
+                'error': False
+            })
+            
+            # Step 5: Tambahkan trend icon
+            result['trend_icon'] = self._get_trend_icon(result['trend'])
+            
+            # Step 6: Cache result jika diaktifkan
+            if use_cache:
+                self.data_cache[cache_key] = {
+                    'result': result,
+                    'timestamp': time.time()
+                }
+                print(f"💾 Result cached with key: {cache_key}")
+            
+            print(f"✅ Prediction complete for {ticker}")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Error in predict_for_ticker: {e}")
+            return self._create_error_response(f"Internal error: {str(e)}", ticker)
+    
+    def _create_error_response(self, message: str, ticker: str = "") -> dict:
+        """Create standardized error response"""
+        return {
+            'error': True,
+            'message': message,
+            'ticker': ticker,
+            'current_price': 0,
+            'predictions': [],
+            'next_day_prediction': 0,
+            'trend': 'unknown',
+            'trend_icon': '❓',
+            'confidence': 0,
+            'processing_time': 0
+        }
+    
+    def _format_ticker_for_yahoo(self, ticker: str) -> str:
+        """Format ticker untuk Yahoo Finance"""
+        ticker = ticker.strip().upper()
+        
+        # Jika ticker tidak mengandung .JK, tambahkan
+        if not ticker.endswith('.JK'):
+            return f"{ticker}.JK"
+        
+        return ticker
+    
+    def _get_fresh_historical_data(self, ticker: str) -> pd.DataFrame:
+        """Get fresh historical data from Yahoo Finance"""
+        try:
+            print(f"📥 Fetching data for {ticker}...")
+            stock = yf.Ticker(ticker)
+            
+            # Coba beberapa period untuk memastikan dapat data
+            periods = ["3mo", "1mo", "6mo", "1y"]
+            
+            for period in periods:
+                df = stock.history(period=period)
+                if not df.empty and len(df) >= 5:
+                    print(f"✅ Got {len(df)} data points for {ticker}")
+                    return df
+            
+            # Jika semua period gagal, coba dengan date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=90)
+            df = stock.history(start=start_date, end=end_date)
+            
+            if df.empty:
+                print(f"❌ No data found for {ticker}")
+                return pd.DataFrame()
+            
+            return df
+            
+        except Exception as e:
+            print(f"❌ Error fetching data for {ticker}: {e}")
+            return pd.DataFrame()
+    
+    def _get_current_price(self, ticker: str, df: pd.DataFrame) -> float:
+        """Get current price from multiple sources"""
+        try:
+            # Cek cache harga dulu
+            if ticker in self.price_cache:
+                cached_time, cached_price = self.price_cache[ticker]
+                if time.time() - cached_time < 30:  # Cache 30 detik untuk harga
+                    print(f"📊 Using cached price for {ticker}: {cached_price}")
                     return cached_price
             
-            # Get stock data from yfinance
-            stock = yf.Ticker(ticker_clean)
+            stock = yf.Ticker(ticker)
             
-            # Try multiple methods to get current price
-            current_price = None
-            
-            # Method 1: Try currentPrice from info
-            info = stock.info
-            current_price = info.get('currentPrice')
-            
-            # Method 2: Try regularMarketPrice
-            if current_price is None:
-                current_price = info.get('regularMarketPrice')
-            
-            # Method 3: Try from last close with today's data
-            if current_price is None:
-                # Get today's intraday data
-                hist = stock.history(period='1d', interval='1m')
-                if not hist.empty:
-                    current_price = hist['Close'].iloc[-1]
-            
-            # Method 4: Get latest daily close
-            if current_price is None:
-                hist = stock.history(period='5d')
-                if not hist.empty:
-                    current_price = hist['Close'].iloc[-1]
-            
-            if current_price is not None and not np.isnan(current_price):
-                # Update cache
-                self.price_cache[ticker_clean] = (current_price, current_time)
-                return float(current_price)
-            
-            return None
-            
-        except Exception as e:
-            print(f"Error getting real-time price for {ticker}: {e}")
-            return None
-    
-    def update_dataframe_with_realtime(self, df, ticker):
-        """
-        Update dataframe with the latest real-time data
-        """
-        if not YFINANCE_AVAILABLE or df.empty:
-            return df
-            
-        try:
-            ticker_clean = ticker.upper().replace('.JK', '') + '.JK'
-            stock = yf.Ticker(ticker_clean)
-            
-            # Get today's data
-            today_data = stock.history(period='1d')
-            
-            if not today_data.empty:
-                latest = today_data.iloc[-1]
-                latest_date = today_data.index[-1]
+            # Method 1: Try to get real-time price
+            try:
+                info = stock.info
+                price_keys = ['currentPrice', 'regularMarketPrice', 'previousClose', 
+                            'ask', 'bid', 'open']
                 
-                # Check if we already have today's data
-                if len(df) > 0 and df.index[-1].date() == latest_date.date():
-                    # Update last row with today's actual data
-                    df.iloc[-1] = {
-                        'Close': latest['Close'],
-                        'High': max(df['High'].iloc[-1], latest['High']) if 'High' in df.columns else latest['High'],
-                        'Low': min(df['Low'].iloc[-1], latest['Low']) if 'Low' in df.columns else latest['Low'],
-                        'Open': latest['Open'] if 'Open' in df.columns else latest['Open'],
-                        'Volume': latest['Volume'] if 'Volume' in df.columns else latest['Volume']
-                    }
-                else:
-                    # Add new row for today
-                    new_row = pd.DataFrame({
-                        'Close': [latest['Close']],
-                        'High': [latest['High']],
-                        'Low': [latest['Low']],
-                        'Open': [latest['Open']] if 'Open' in df.columns else [latest['Open']],
-                        'Volume': [latest['Volume']] if 'Volume' in df.columns else [latest['Volume']]
-                    }, index=[latest_date])
-                    
-                    df = pd.concat([df, new_row])
+                for key in price_keys:
+                    price = info.get(key)
+                    if price and not np.isnan(price):
+                        print(f"✅ Got real-time price for {ticker}: {price} (from {key})")
+                        # Cache the price
+                        self.price_cache[ticker] = (time.time(), float(price))
+                        return float(price)
+            except:
+                pass
             
-            return df
+            # Method 2: Try to get latest from 1-day history
+            try:
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
+                    print(f"✅ Got 1-day price for {ticker}: {price}")
+                    self.price_cache[ticker] = (time.time(), float(price))
+                    return float(price)
+            except:
+                pass
+            
+            # Method 3: Use last close from the dataframe
+            if len(df) > 0:
+                price = df['Close'].iloc[-1]
+                print(f"⚠️ Using last close price for {ticker}: {price}")
+                return float(price)
+            
+            print(f"❌ Could not get price for {ticker}")
+            return 0.0
             
         except Exception as e:
-            print(f"Error updating dataframe: {e}")
-            return df
+            print(f"❌ Error getting price for {ticker}: {e}")
+            if len(df) > 0:
+                return float(df['Close'].iloc[-1])
+            return 0.0
+    
+    def _get_price_source(self, ticker: str, df: pd.DataFrame) -> str:
+        """Determine the source of the price"""
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            if info.get('currentPrice') and not np.isnan(info.get('currentPrice')):
+                return "real-time (currentPrice)"
+            elif info.get('regularMarketPrice') and not np.isnan(info.get('regularMarketPrice')):
+                return "real-time (regularMarketPrice)"
+            else:
+                return "historical (last close)"
+        except:
+            return "historical (last close)"
+    
+    def _is_realtime_price_used(self, ticker: str, df: pd.DataFrame) -> bool:
+        """Check if real-time price was used"""
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            if (info.get('currentPrice') and not np.isnan(info.get('currentPrice'))) or \
+               (info.get('regularMarketPrice') and not np.isnan(info.get('regularMarketPrice'))):
+                return True
+            return False
+        except:
+            return False
+    
+    def _get_trend_icon(self, trend: str) -> str:
+        """Get icon based on trend"""
+        trend_lower = trend.lower()
+        if 'bullish' in trend_lower:
+            return '📈'
+        elif 'bearish' in trend_lower:
+            return '📉'
+        elif 'sideways' in trend_lower:
+            return '➡️'
+        elif 'correction' in trend_lower:
+            return '↘️'
+        elif 'rebound' in trend_lower:
+            return '↗️'
+        else:
+            return '📊'
+    
+    # ========== MODIFIED PREDICTION METHOD ==========
+    
+    def predict_with_volatility_model_and_price(self, df: pd.DataFrame, current_price: float, days: int = 5) -> dict:
+        """
+        Modified version of predict_with_volatility_model that accepts current_price parameter
+        """
+        if len(df) < 10:
+            return self._get_ultra_conservative_prediction_with_price(df, current_price)
+        
+        volatility = self.calculate_historical_volatility(df)
+        
+        # Calculate Bollinger Bands
+        bb = self.calculate_bollinger_bands(df)
+        
+        # Get support/resistance
+        sr_levels = self.get_support_resistance_levels(df)
+        
+        # Generate predictions with mean reversion
+        predictions = []
+        last_price = current_price
+        
+        for day in range(days):
+            # Mean reversion factor (prices tend to revert to mean)
+            if bb:
+                mean_reversion_factor = 0.3 * (bb['middle'] - last_price) / bb['middle']
+            else:
+                mean_reversion_factor = 0
+            
+            # Random component based on historical volatility
+            random_component = np.random.normal(0, volatility) * 0.7  # Reduced randomness
+            
+            # Combined daily change (capped)
+            daily_change = mean_reversion_factor + random_component
+            daily_change = max(-self.MAX_DAILY_CHANGE, min(self.MAX_DAILY_CHANGE, daily_change))
+            
+            next_price = last_price * (1 + daily_change)
+            
+            # Apply support/resistance boundaries
+            if sr_levels.get('recent_high') and next_price > sr_levels['recent_high'] * 1.02:
+                next_price = sr_levels['recent_high'] * 0.98  # Resistance bounce
+            
+            if sr_levels.get('recent_low') and next_price < sr_levels['recent_low'] * 0.98:
+                next_price = sr_levels['recent_low'] * 1.02  # Support bounce
+            
+            predictions.append(next_price)
+            last_price = next_price
+        
+        # Calculate trend (very conservative)
+        avg_prediction = np.mean(predictions)
+        trend_percentage = (avg_prediction - current_price) / current_price * 100
+        
+        if abs(trend_percentage) < 0.5:
+            trend = "sideways"
+        elif trend_percentage > 1.5:
+            trend = "bullish"
+        elif trend_percentage > 0:
+            trend = "slightly bullish"
+        elif trend_percentage < -1.5:
+            trend = "bearish"
+        else:
+            trend = "slightly bearish"
+        
+        # Confidence decays with prediction horizon
+        confidence = max(30, 70 * (self.CONFIDENCE_DECAY ** (days-1)))
+        
+        # Calculate realistic range based on volatility
+        volatility_multiplier = min(days * 0.015, 0.05)  # Max 5% for 5 days
+        optimistic = current_price * (1 + volatility_multiplier)
+        pessimistic = current_price * (1 - volatility_multiplier)
+        
+        return {
+            'current_price': round(float(current_price), 2),
+            'predictions': [round(float(p), 2) for p in predictions],
+            'next_day_prediction': round(float(predictions[0]), 2),
+            'trend': trend,
+            'confidence': round(float(confidence), 1),
+            'potential_change_pct': round(((predictions[0] - current_price) / current_price * 100), 2),
+            'avg_prediction': round(float(avg_prediction), 2),
+            'volatility_pct': round(volatility * 100, 2),
+            'bollinger_bands': bb,
+            'support_resistance': sr_levels,
+            'realistic_range': {
+                'optimistic': round(float(optimistic), 2),  # Max +5% in 5 days
+                'pessimistic': round(float(pessimistic), 2), # Max -5% in 5 days
+                'most_likely': round(np.median(predictions), 2)
+            },
+            'disclaimer': "Prediksi didasarkan pada volatilitas historis. Pergerakan aktual bisa berbeda. Gunakan hanya sebagai referensi tambahan."
+        }
+    
+    def _get_ultra_conservative_prediction_with_price(self, df: pd.DataFrame, current_price: float) -> dict:
+        """Ultra conservative prediction when data is limited with custom price"""
+        # Simple mean reversion prediction
+        if len(df) >= 5:
+            ma_5 = df['Close'].rolling(5).mean().iloc[-1]
+            # Very small mean reversion
+            if current_price > ma_5 * 1.02:
+                next_price = current_price * 0.995  # Slight correction
+                trend = "slight correction"
+                trend_icon = "↘️"
+            elif current_price < ma_5 * 0.98:
+                next_price = current_price * 1.005  # Slight rebound
+                trend = "slight rebound"
+                trend_icon = "↗️"
+            else:
+                next_price = current_price
+                trend = "sideways"
+                trend_icon = "➡️"
+        else:
+            next_price = current_price
+            trend = "sideways"
+            trend_icon = "➡️"
+        
+        predictions = [next_price] * 5
+        
+        return {
+            'current_price': round(float(current_price), 2),
+            'predictions': [round(float(p), 2) for p in predictions],
+            'next_day_prediction': round(float(next_price), 2),
+            'trend': trend,
+            'trend_icon': trend_icon,
+            'confidence': 40,  # Low confidence due to limited data
+            'potential_change_pct': 0.0,
+            'avg_prediction': round(float(current_price), 2),
+            'volatility_pct': 1.5,
+            'bollinger_bands': None,
+            'support_resistance': {'current': current_price},
+            'realistic_range': {
+                'optimistic': round(current_price * 1.03, 2),
+                'pessimistic': round(current_price * 0.97, 2),
+                'most_likely': round(current_price, 2)
+            },
+            'disclaimer': "Prediksi sangat konservatif karena data terbatas. Tidak direkomendasikan untuk keputusan investasi."
+        }
+    
+    # ========== KEEP EXISTING METHODS (with minor fixes) ==========
     
     def calculate_historical_volatility(self, df):
         """Calculate realistic historical volatility"""
         if len(df) < 10:
             return 0.015  # Default 1.5% volatility
         
-        if 'Close' not in df.columns:
-            return 0.015
-            
         returns = df['Close'].pct_change().dropna()
         if len(returns) < 5:
             return 0.015
@@ -157,7 +446,7 @@ class ConservativePricePredictor:
     
     def calculate_bollinger_bands(self, df, window=20):
         """Calculate Bollinger Bands for realistic price ranges"""
-        if len(df) < window or 'Close' not in df.columns:
+        if len(df) < window:
             return None
         
         rolling_mean = df['Close'].rolling(window=window).mean()
@@ -167,22 +456,16 @@ class ConservativePricePredictor:
         lower_band = rolling_mean - (2 * rolling_std)
         
         return {
-            'upper': float(upper_band.iloc[-1]) if not pd.isna(upper_band.iloc[-1]) else None,
-            'middle': float(rolling_mean.iloc[-1]) if not pd.isna(rolling_mean.iloc[-1]) else None,
-            'lower': float(lower_band.iloc[-1]) if not pd.isna(lower_band.iloc[-1]) else None,
-            'width_pct': float((upper_band.iloc[-1] - lower_band.iloc[-1]) / rolling_mean.iloc[-1] * 100) if not pd.isna(rolling_mean.iloc[-1]) else None
+            'upper': float(upper_band.iloc[-1]),
+            'middle': float(rolling_mean.iloc[-1]),
+            'lower': float(lower_band.iloc[-1]),
+            'width_pct': float((upper_band.iloc[-1] - lower_band.iloc[-1]) / rolling_mean.iloc[-1] * 100)
         }
     
     def get_support_resistance_levels(self, df):
         """Identify key support and resistance levels"""
         if len(df) < 20:
-            return {'current': 0}
-        
-        # Ensure required columns exist
-        required_cols = ['Close', 'High', 'Low']
-        for col in required_cols:
-            if col not in df.columns:
-                return {'current': float(df['Close'].iloc[-1]) if 'Close' in df.columns else 0}
+            return {'current': df['Close'].iloc[-1] if len(df) > 0 else 0}
         
         # Simple approach: recent highs and lows
         recent_high = df['High'].tail(20).max()
@@ -191,22 +474,11 @@ class ConservativePricePredictor:
         
         # Psychological levels (round numbers)
         def find_psychological_levels(price):
+            # Round to nearest 50, 100, 500
             levels = []
-            # Untuk harga IDR, round to nearest 50, 100
-            base_100 = round(price / 100) * 100
-            base_50 = round(price / 50) * 50
-            
-            levels.extend([
-                base_100 - 200, base_100 - 100, base_100, base_100 + 100, base_100 + 200,
-                base_50 - 100, base_50 - 50, base_50, base_50 + 50, base_50 + 100
-            ])
-            
-            # Filter positive and unique levels
-            unique_levels = sorted(list(set([l for l in levels if l > 0])))
-            
-            # Return levels near current price
-            near_levels = [l for l in unique_levels if abs(l - current) / current < 0.1]  # Within 10%
-            return near_levels[:5]  # Return top 5 nearest
+            base = round(price / 100) * 100
+            levels.extend([base - 200, base - 100, base, base + 100, base + 200])
+            return [l for l in levels if l > 0]
         
         psych_levels = find_psychological_levels(current)
         
@@ -214,291 +486,83 @@ class ConservativePricePredictor:
             'recent_high': float(recent_high),
             'recent_low': float(recent_low),
             'current': float(current),
-            'psychological_levels': psych_levels
+            'psychological_levels': psych_levels[:3]  # Top 3 nearest
         }
     
-    def predict_with_volatility_model(self, df, ticker=None, days=5):
-        """Predict using volatility-based random walk with mean reversion"""
-        try:
-            # Get current price - prioritize real-time if ticker provided
-            current_price = None
-            
-            if ticker and YFINANCE_AVAILABLE:
-                current_price = self.get_realtime_price(ticker)
-                
-                # Update dataframe with latest data
-                if current_price and not df.empty:
-                    df = self.update_dataframe_with_realtime(df, ticker)
-            
-            # Fallback to dataframe if real-time not available
-            if current_price is None or np.isnan(current_price):
-                if df.empty or 'Close' not in df.columns:
-                    return self._get_ultra_conservative_prediction(df, current_price)
-                current_price = df['Close'].iloc[-1]
-            
-            # If dataframe is too small, use ultra conservative method
-            if len(df) < 30:
-                result = self._get_ultra_conservative_prediction(df, current_price)
-                # Ensure current price is updated
-                result['current_price'] = round(float(current_price), 2)
-                return result
-            
-            volatility = self.calculate_historical_volatility(df)
-            
-            # Calculate Bollinger Bands
-            bb = self.calculate_bollinger_bands(df)
-            
-            # Get support/resistance
-            sr_levels = self.get_support_resistance_levels(df)
-            
-            # Generate predictions with mean reversion
-            predictions = []
-            last_price = current_price
-            
-            for day in range(days):
-                # Mean reversion factor (prices tend to revert to mean)
-                if bb and bb['middle']:
-                    mean_reversion_factor = 0.3 * (bb['middle'] - last_price) / bb['middle']
-                else:
-                    mean_reversion_factor = 0
-                
-                # Random component based on historical volatility
-                random_component = np.random.normal(0, volatility) * 0.7  # Reduced randomness
-                
-                # Combined daily change (capped)
-                daily_change = mean_reversion_factor + random_component
-                daily_change = max(-self.MAX_DAILY_CHANGE, min(self.MAX_DAILY_CHANGE, daily_change))
-                
-                next_price = last_price * (1 + daily_change)
-                
-                # Apply support/resistance boundaries
-                if 'recent_high' in sr_levels and sr_levels['recent_high'] and next_price > sr_levels['recent_high'] * 1.02:
-                    next_price = sr_levels['recent_high'] * 0.98  # Resistance bounce
-                
-                if 'recent_low' in sr_levels and sr_levels['recent_low'] and next_price < sr_levels['recent_low'] * 0.98:
-                    next_price = sr_levels['recent_low'] * 1.02  # Support bounce
-                
-                predictions.append(next_price)
-                last_price = next_price
-            
-            # Calculate trend (very conservative)
-            avg_prediction = np.mean(predictions)
-            trend_percentage = (avg_prediction - current_price) / current_price * 100
-            
-            if abs(trend_percentage) < 0.5:
-                trend = "sideways"
-            elif trend_percentage > 0:
-                trend = "slightly bullish"
-            else:
-                trend = "slightly bearish"
-            
-            # Confidence decays with prediction horizon
-            confidence = max(30, 70 * (self.CONFIDENCE_DECAY ** (days-1)))
-            
-            # Format untuk display IDR
-            def format_idr(price):
-                return f"Rp {price:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-            
-            return {
-                'current_price': round(float(current_price), 2),
-                'current_price_formatted': format_idr(current_price),
-                'predictions': [round(float(p), 2) for p in predictions],
-                'predictions_formatted': [format_idr(p) for p in predictions],
-                'next_day_prediction': round(float(predictions[0]), 2),
-                'next_day_prediction_formatted': format_idr(predictions[0]),
-                'trend': trend,
-                'confidence': round(float(confidence), 1),
-                'potential_change_pct': round(((predictions[0] - current_price) / current_price * 100), 2),
-                'avg_prediction': round(float(avg_prediction), 2),
-                'avg_prediction_formatted': format_idr(avg_prediction),
-                'volatility_pct': round(volatility * 100, 2),
-                'bollinger_bands': bb,
-                'support_resistance': sr_levels,
-                'realistic_range': {
-                    'optimistic': round(current_price * 1.05, 2),
-                    'optimistic_formatted': format_idr(current_price * 1.05),
-                    'pessimistic': round(current_price * 0.95, 2),
-                    'pessimistic_formatted': format_idr(current_price * 0.95),
-                    'most_likely': round(np.median(predictions), 2),
-                    'most_likely_formatted': format_idr(np.median(predictions))
-                },
-                'data_source': 'Real-time Yahoo Finance' if ticker and current_price else 'Historical Data',
-                'disclaimer': "Prediksi didasarkan pada volatilitas historis dan data real-time. Harga saham dapat berfluktuasi. Prediksi ini bukan rekomendasi investasi. Selalu lakukan analisis sendiri dan konsultasi dengan penasihat keuangan."
-            }
-            
-        except Exception as e:
-            print(f"Error in prediction: {e}")
-            return self._get_ultra_conservative_prediction(df, None)
+    def predict_with_volatility_model(self, df, days=5):
+        """
+        Original method - kept for backward compatibility
+        Uses last price from dataframe
+        """
+        if len(df) == 0:
+            return self._get_ultra_conservative_prediction_with_price(df, 0)
+        
+        current_price = df['Close'].iloc[-1]
+        return self.predict_with_volatility_model_and_price(df, current_price, days)
     
-    def _get_ultra_conservative_prediction(self, df, current_price=None):
-        """Ultra conservative prediction when data is limited"""
-        try:
-            if current_price is None:
-                if df.empty or 'Close' not in df.columns:
-                    current_price = 0
-                else:
-                    current_price = df['Close'].iloc[-1]
-            
-            # Simple mean reversion prediction
-            next_price = current_price
-            trend = "sideways"
-            
-            if not df.empty and len(df) >= 5 and 'Close' in df.columns:
-                ma_5 = df['Close'].rolling(5).mean().iloc[-1]
-                if not pd.isna(ma_5):
-                    # Very small mean reversion
-                    if current_price > ma_5 * 1.02:
-                        next_price = current_price * 0.995  # Slight correction
-                        trend = "slight correction"
-                    elif current_price < ma_5 * 0.98:
-                        next_price = current_price * 1.005  # Slight rebound
-                        trend = "slight rebound"
-            
-            predictions = [next_price] * 5
-            
-            # Format untuk display IDR
-            def format_idr(price):
-                return f"Rp {price:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-            
-            return {
-                'current_price': round(float(current_price), 2),
-                'current_price_formatted': format_idr(current_price),
-                'predictions': [round(float(p), 2) for p in predictions],
-                'predictions_formatted': [format_idr(p) for p in predictions],
-                'next_day_prediction': round(float(next_price), 2),
-                'next_day_prediction_formatted': format_idr(next_price),
-                'trend': trend,
-                'confidence': 40,  # Low confidence due to limited data
-                'potential_change_pct': 0.0,
-                'avg_prediction': round(float(current_price), 2),
-                'avg_prediction_formatted': format_idr(current_price),
-                'volatility_pct': 1.5,
-                'bollinger_bands': None,
-                'support_resistance': {'current': current_price},
-                'realistic_range': {
-                    'optimistic': round(current_price * 1.03, 2),
-                    'optimistic_formatted': format_idr(current_price * 1.03),
-                    'pessimistic': round(current_price * 0.97, 2),
-                    'pessimistic_formatted': format_idr(current_price * 0.97),
-                    'most_likely': round(current_price, 2),
-                    'most_likely_formatted': format_idr(current_price)
-                },
-                'data_source': 'Limited Historical Data',
-                'disclaimer': "Prediksi sangat konservatif karena data terbatas. Harga real-time mungkin tidak tersedia. Tidak direkomendasikan untuk keputusan investasi."
-            }
-            
-        except Exception as e:
-            print(f"Error in ultra conservative prediction: {e}")
-            # Return minimal response
-            return {
-                'current_price': 0,
-                'current_price_formatted': 'Rp 0',
-                'predictions': [0] * 5,
-                'predictions_formatted': ['Rp 0'] * 5,
-                'next_day_prediction': 0,
-                'next_day_prediction_formatted': 'Rp 0',
-                'trend': 'unknown',
-                'confidence': 10,
-                'potential_change_pct': 0,
-                'avg_prediction': 0,
-                'avg_prediction_formatted': 'Rp 0',
-                'volatility_pct': 0,
-                'bollinger_bands': None,
-                'support_resistance': {'current': 0},
-                'realistic_range': {
-                    'optimistic': 0,
-                    'optimistic_formatted': 'Rp 0',
-                    'pessimistic': 0,
-                    'pessimistic_formatted': 'Rp 0',
-                    'most_likely': 0,
-                    'most_likely_formatted': 'Rp 0'
-                },
-                'data_source': 'Error',
-                'disclaimer': "Terjadi error dalam prediksi. Silakan coba lagi atau periksa koneksi internet."
-            }
+    def _get_ultra_conservative_prediction(self, df):
+        """Original ultra conservative prediction method"""
+        if len(df) == 0:
+            current_price = 0
+        else:
+            current_price = df['Close'].iloc[-1]
+        
+        return self._get_ultra_conservative_prediction_with_price(df, current_price)
     
-    def generate_trading_scenarios(self, df, ticker=None):
+    def generate_trading_scenarios(self, df):
         """Generate realistic trading scenarios instead of precise predictions"""
-        try:
-            # Get current price
-            current_price = None
-            if ticker and YFINANCE_AVAILABLE:
-                current_price = self.get_realtime_price(ticker)
-            
-            if current_price is None or np.isnan(current_price):
-                if df.empty or 'Close' not in df.columns:
-                    return self._get_basic_scenarios(df, current_price)
-                current_price = df['Close'].iloc[-1]
-            
-            if len(df) < 20:
-                return self._get_basic_scenarios(df, current_price)
-            
-            volatility = self.calculate_historical_volatility(df)
-            
-            # Format untuk display IDR
-            def format_idr(price):
-                return f"Rp {price:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-            
-            scenarios = {
-                'bullish_scenario': {
-                    'probability': '30%',
-                    'description': 'Breakout atas dengan volume tinggi',
-                    'target': round(current_price * (1 + volatility * 3), 2),
-                    'target_formatted': format_idr(current_price * (1 + volatility * 3)),
-                    'stop_loss': round(current_price * (1 - volatility * 2), 2),
-                    'stop_loss_formatted': format_idr(current_price * (1 - volatility * 2)),
-                    'condition': 'Volume > rata-rata 20 hari',
-                    'risk': 'Medium-High'
+        if len(df) < 20:
+            return self._get_basic_scenarios(df)
+        
+        current_price = df['Close'].iloc[-1]
+        volatility = self.calculate_historical_volatility(df)
+        
+        scenarios = {
+            'bullish_scenario': {
+                'probability': '30%',
+                'description': 'Breakout atas dengan volume tinggi',
+                'target': round(current_price * (1 + volatility * 3), 2),
+                'stop_loss': round(current_price * (1 - volatility * 2), 2),
+                'condition': 'Volume > rata-rata 20 hari',
+                'risk': 'Medium-High'
+            },
+            'bearish_scenario': {
+                'probability': '25%',
+                'description': 'Koreksi menuju support',
+                'target': round(current_price * (1 - volatility * 2.5), 2),
+                'stop_loss': round(current_price * (1 + volatility * 1.5), 2),
+                'condition': 'RSI > 70 dan MACD negatif',
+                'risk': 'Medium'
+            },
+            'sideways_scenario': {
+                'probability': '45%',
+                'description': 'Konsolidasi dalam range',
+                'range': {
+                    'upper': round(current_price * (1 + volatility * 1.5), 2),
+                    'lower': round(current_price * (1 - volatility * 1.5), 2)
                 },
-                'bearish_scenario': {
-                    'probability': '25%',
-                    'description': 'Koreksi menuju support',
-                    'target': round(current_price * (1 - volatility * 2.5), 2),
-                    'target_formatted': format_idr(current_price * (1 - volatility * 2.5)),
-                    'stop_loss': round(current_price * (1 + volatility * 1.5), 2),
-                    'stop_loss_formatted': format_idr(current_price * (1 + volatility * 1.5)),
-                    'condition': 'RSI > 70 dan MACD negatif',
-                    'risk': 'Medium'
-                },
-                'sideways_scenario': {
-                    'probability': '45%',
-                    'description': 'Konsolidasi dalam range',
-                    'range': {
-                        'upper': round(current_price * (1 + volatility * 1.5), 2),
-                        'upper_formatted': format_idr(current_price * (1 + volatility * 1.5)),
-                        'lower': round(current_price * (1 - volatility * 1.5), 2),
-                        'lower_formatted': format_idr(current_price * (1 - volatility * 1.5))
-                    },
-                    'strategy': 'Range trading',
-                    'risk': 'Low'
-                }
+                'strategy': 'Range trading',
+                'risk': 'Low'
             }
-            
-            return scenarios
-            
-        except Exception as e:
-            print(f"Error generating scenarios: {e}")
-            return self._get_basic_scenarios(df, None)
+        }
+        
+        return scenarios
     
-    def _get_basic_scenarios(self, df, current_price=None):
+    def _get_basic_scenarios(self, df):
         """Basic scenarios when data is limited"""
-        if current_price is None:
-            if df.empty or 'Close' not in df.columns:
-                current_price = 0
-            else:
-                current_price = df['Close'].iloc[-1]
+        if len(df) == 0:
+            current_price = 0
+        else:
+            current_price = df['Close'].iloc[-1]
         
         return {
             'conservative_advice': {
                 'message': 'Data tidak cukup untuk analisis teknis mendalam',
                 'recommendation': 'Tunggu konfirmasi lebih lanjut',
                 'suggested_action': 'Monitor dan tunggu setup yang jelas',
-                'risk_level': 'High (karena ketidakpastian)',
-                'current_price': round(float(current_price), 2),
-                'current_price_formatted': f"Rp {current_price:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                'risk_level': 'High (karena ketidakpastian)'
             }
         }
 
-
-# Untuk backward compatibility dengan kode yang mengimpor PricePredictor
+# Alias untuk compatibility
 PricePredictor = ConservativePricePredictor
