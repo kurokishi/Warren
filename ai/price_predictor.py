@@ -33,7 +33,7 @@ class ConservativePricePredictor:
         self.price_cache = {}
         self.cache_timeout = 60  # Cache timeout 60 detik
     
-    # ========== NEW METHODS FOR TICKER-BASED PREDICTION ==========
+    # ========== CACHE MANAGEMENT ==========
     
     def clear_cache(self, ticker: str = None):
         """Clear cache untuk ticker tertentu atau semua cache"""
@@ -47,6 +47,8 @@ class ConservativePricePredictor:
             self.data_cache = {}
             self.price_cache = {}
             print("All cache cleared")
+    
+    # ========== MAIN PREDICTION METHOD ==========
     
     def predict_for_ticker(self, ticker: str, days: int = 5, use_cache: bool = True) -> dict:
         """
@@ -122,10 +124,7 @@ class ConservativePricePredictor:
                 'error': False
             })
             
-            # Step 5: Tambahkan trend icon
-            result['trend_icon'] = self._get_trend_icon(result['trend'])
-            
-            # Step 6: Cache result jika diaktifkan
+            # Step 5: Cache result jika diaktifkan
             if use_cache:
                 self.data_cache[cache_key] = {
                     'result': result,
@@ -151,9 +150,23 @@ class ConservativePricePredictor:
             'next_day_prediction': 0,
             'trend': 'unknown',
             'trend_icon': '❓',
+            'trend_percentage': 0.0,
             'confidence': 0,
+            'potential_change_pct': 0.0,
+            'avg_prediction': 0,
+            'volatility_pct': 0.0,
+            'bollinger_bands': None,
+            'support_resistance': {},
+            'realistic_range': {
+                'optimistic': 0,
+                'pessimistic': 0,
+                'most_likely': 0
+            },
+            'disclaimer': "Error dalam prediksi. Silakan coba lagi.",
             'processing_time': 0
         }
+    
+    # ========== HELPER METHODS ==========
     
     def _format_ticker_for_yahoo(self, ticker: str) -> str:
         """Format ticker untuk Yahoo Finance"""
@@ -277,23 +290,7 @@ class ConservativePricePredictor:
         except:
             return False
     
-    def _get_trend_icon(self, trend: str) -> str:
-        """Get icon based on trend"""
-        trend_lower = trend.lower()
-        if 'bullish' in trend_lower:
-            return '📈'
-        elif 'bearish' in trend_lower:
-            return '📉'
-        elif 'sideways' in trend_lower:
-            return '➡️'
-        elif 'correction' in trend_lower:
-            return '↘️'
-        elif 'rebound' in trend_lower:
-            return '↗️'
-        else:
-            return '📊'
-    
-    # ========== MODIFIED PREDICTION METHOD ==========
+    # ========== PREDICTION ENGINE ==========
     
     def predict_with_volatility_model_and_price(self, df: pd.DataFrame, current_price: float, days: int = 5) -> dict:
         """
@@ -316,13 +313,12 @@ class ConservativePricePredictor:
         
         for day in range(days):
             # Mean reversion factor (prices tend to revert to mean)
-            if bb:
+            mean_reversion_factor = 0
+            if bb and bb.get('middle'):
                 mean_reversion_factor = 0.3 * (bb['middle'] - last_price) / bb['middle']
-            else:
-                mean_reversion_factor = 0
             
             # Random component based on historical volatility
-            random_component = np.random.normal(0, volatility) * 0.7  # Reduced randomness
+            random_component = np.random.normal(0, volatility) * 0.7
             
             # Combined daily change (capped)
             daily_change = mean_reversion_factor + random_component
@@ -332,52 +328,63 @@ class ConservativePricePredictor:
             
             # Apply support/resistance boundaries
             if sr_levels.get('recent_high') and next_price > sr_levels['recent_high'] * 1.02:
-                next_price = sr_levels['recent_high'] * 0.98  # Resistance bounce
+                next_price = sr_levels['recent_high'] * 0.98
             
             if sr_levels.get('recent_low') and next_price < sr_levels['recent_low'] * 0.98:
-                next_price = sr_levels['recent_low'] * 1.02  # Support bounce
+                next_price = sr_levels['recent_low'] * 1.02
             
             predictions.append(next_price)
             last_price = next_price
         
-        # Calculate trend (very conservative)
+        # Calculate trend
         avg_prediction = np.mean(predictions)
         trend_percentage = (avg_prediction - current_price) / current_price * 100
         
+        # Determine trend
         if abs(trend_percentage) < 0.5:
             trend = "sideways"
-        elif trend_percentage > 1.5:
+            trend_icon = "➡️"
+        elif trend_percentage > 2.0:
             trend = "bullish"
+            trend_icon = "📈"
         elif trend_percentage > 0:
             trend = "slightly bullish"
-        elif trend_percentage < -1.5:
+            trend_icon = "↗️"
+        elif trend_percentage < -2.0:
             trend = "bearish"
+            trend_icon = "📉"
         else:
             trend = "slightly bearish"
+            trend_icon = "↘️"
         
         # Confidence decays with prediction horizon
         confidence = max(30, 70 * (self.CONFIDENCE_DECAY ** (days-1)))
         
         # Calculate realistic range based on volatility
-        volatility_multiplier = min(days * 0.015, 0.05)  # Max 5% for 5 days
+        volatility_multiplier = min(days * 0.015, 0.05)
         optimistic = current_price * (1 + volatility_multiplier)
         pessimistic = current_price * (1 - volatility_multiplier)
+        
+        # Calculate potential change for next day
+        potential_change_pct = ((predictions[0] - current_price) / current_price * 100) if predictions else 0
         
         return {
             'current_price': round(float(current_price), 2),
             'predictions': [round(float(p), 2) for p in predictions],
-            'next_day_prediction': round(float(predictions[0]), 2),
+            'next_day_prediction': round(float(predictions[0]), 2) if predictions else round(float(current_price), 2),
             'trend': trend,
+            'trend_icon': trend_icon,
+            'trend_percentage': round(float(trend_percentage), 2),
             'confidence': round(float(confidence), 1),
-            'potential_change_pct': round(((predictions[0] - current_price) / current_price * 100), 2),
+            'potential_change_pct': round(float(potential_change_pct), 2),
             'avg_prediction': round(float(avg_prediction), 2),
             'volatility_pct': round(volatility * 100, 2),
             'bollinger_bands': bb,
             'support_resistance': sr_levels,
             'realistic_range': {
-                'optimistic': round(float(optimistic), 2),  # Max +5% in 5 days
-                'pessimistic': round(float(pessimistic), 2), # Max -5% in 5 days
-                'most_likely': round(np.median(predictions), 2)
+                'optimistic': round(float(optimistic), 2),
+                'pessimistic': round(float(pessimistic), 2),
+                'most_likely': round(np.median(predictions), 2) if predictions else round(float(current_price), 2)
             },
             'disclaimer': "Prediksi didasarkan pada volatilitas historis. Pergerakan aktual bisa berbeda. Gunakan hanya sebagai referensi tambahan."
         }
@@ -392,18 +399,22 @@ class ConservativePricePredictor:
                 next_price = current_price * 0.995  # Slight correction
                 trend = "slight correction"
                 trend_icon = "↘️"
+                trend_percentage = -0.5
             elif current_price < ma_5 * 0.98:
                 next_price = current_price * 1.005  # Slight rebound
                 trend = "slight rebound"
                 trend_icon = "↗️"
+                trend_percentage = 0.5
             else:
                 next_price = current_price
                 trend = "sideways"
                 trend_icon = "➡️"
+                trend_percentage = 0.0
         else:
             next_price = current_price
             trend = "sideways"
             trend_icon = "➡️"
+            trend_percentage = 0.0
         
         predictions = [next_price] * 5
         
@@ -413,7 +424,8 @@ class ConservativePricePredictor:
             'next_day_prediction': round(float(next_price), 2),
             'trend': trend,
             'trend_icon': trend_icon,
-            'confidence': 40,  # Low confidence due to limited data
+            'trend_percentage': round(float(trend_percentage), 2),
+            'confidence': 40.0,
             'potential_change_pct': 0.0,
             'avg_prediction': round(float(current_price), 2),
             'volatility_pct': 1.5,
@@ -427,7 +439,7 @@ class ConservativePricePredictor:
             'disclaimer': "Prediksi sangat konservatif karena data terbatas. Tidak direkomendasikan untuk keputusan investasi."
         }
     
-    # ========== KEEP EXISTING METHODS (with minor fixes) ==========
+    # ========== ORIGINAL METHODS (KEPT FOR BACKWARD COMPATIBILITY) ==========
     
     def calculate_historical_volatility(self, df):
         """Calculate realistic historical volatility"""
@@ -442,7 +454,7 @@ class ConservativePricePredictor:
         volatility = returns.rolling(window=min(10, len(returns))).std().iloc[-1]
         
         # Cap volatility at reasonable levels
-        return min(max(volatility, 0.005), 0.05)  # Between 0.5% and 5%
+        return min(max(volatility, 0.005), 0.05)
     
     def calculate_bollinger_bands(self, df, window=20):
         """Calculate Bollinger Bands for realistic price ranges"""
@@ -467,14 +479,11 @@ class ConservativePricePredictor:
         if len(df) < 20:
             return {'current': df['Close'].iloc[-1] if len(df) > 0 else 0}
         
-        # Simple approach: recent highs and lows
         recent_high = df['High'].tail(20).max()
         recent_low = df['Low'].tail(20).min()
         current = df['Close'].iloc[-1]
         
-        # Psychological levels (round numbers)
         def find_psychological_levels(price):
-            # Round to nearest 50, 100, 500
             levels = []
             base = round(price / 100) * 100
             levels.extend([base - 200, base - 100, base, base + 100, base + 200])
@@ -486,7 +495,7 @@ class ConservativePricePredictor:
             'recent_high': float(recent_high),
             'recent_low': float(recent_low),
             'current': float(current),
-            'psychological_levels': psych_levels[:3]  # Top 3 nearest
+            'psychological_levels': psych_levels[:3]
         }
     
     def predict_with_volatility_model(self, df, days=5):
